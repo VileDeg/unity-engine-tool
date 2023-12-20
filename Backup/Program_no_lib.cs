@@ -1,21 +1,40 @@
-﻿using System.Diagnostics;
+﻿// See https://aka.ms/new-console-template for more information
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
+using System.IO;
+using YamlDotNet.RepresentationModel;
+using System.Dynamic;
 
 namespace Tool
 {
-    class Transform
+    class GameObject
     {
-        public int FileID { get; set; }
-
         public string? Name { get; set; }
+        public int TransformFileID { get; set; }
+        public List<GameObject> Children { get; set; }
 
-        public int GameObjectFileID { get; set; }
-        public int FatherFileID { get; set; }
-
-        public List<Transform> Children { get; set; }
-
-        public Transform()
+        public GameObject()
         {
             Children = [];
+        }
+
+        public GameObject? GetGameObjectById(int id)
+        {
+            if (TransformFileID == id)
+            {
+                return this;
+            }
+
+            foreach (var child in Children)
+            {
+                var result = child.GetGameObjectById(id);
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+
+            return null;
         }
 
         public void WriteToFile(StreamWriter file, int deep)
@@ -24,17 +43,12 @@ namespace Tool
             {
                 file.Write("--");
             }
-            file.WriteLine(Name);
+            file.WriteLine("Name");
             foreach (var child in Children)
             {
                 child.WriteToFile(file, deep+1);
             }
         }
-    }
-    class GameObject
-    {
-        public string? Name { get; set; }
-        public int GameObjectFileID { get; set; }
     }
     class Program
     {
@@ -78,12 +92,13 @@ namespace Tool
                 Console.WriteLine($"Error: {e.Message}");
                 return;
             }
+            
 
             for (int i = 0; i < sceneFiles.Length; i++)
             {
                 string sceneFile = sceneFiles[i];
 
-                string outputFilePath = Path.Combine(outputFolderPath, Path.GetFileNameWithoutExtension(sceneFile) + ".unity.dump");
+                string outputFilePath = Path.Combine(outputFolderPath, Path.GetFileNameWithoutExtension(sceneFile) + ".scene.dump");
 
                 
                 StreamReader reader = File.OpenText(sceneFile);
@@ -94,25 +109,27 @@ namespace Tool
                     return;
                 }
 
+                
+
                 Console.WriteLine($"Parsing scene file: {sceneFile}");
 
-                List<GameObject> allGameObjects = [];
-                List<Transform> allTransforms = [];
+                //List<GameObject> gameObjects = [];                
+
+                GameObject rootGameObject = new();
 
                 string? line;
                 while ((line = reader.ReadLine()) != null) 
                 {
                     // Check if line contains --- !u!
                    
+                    GameObject? gameObject = null;
                     if (line.StartsWith("--- !u!1 ")) // GameObject
                     {
-                        GameObject gameObject = new();
+                        gameObject = new();
                         // split line by space
                         string[] lineSplit = line.Split(' ');
                         string gameObjectId = lineSplit[2];
                         int gameObjectIdInt = int.Parse(gameObjectId[1..]);
-
-                        gameObject.GameObjectFileID = gameObjectIdInt;
 
                         Console.WriteLine($"Found GameObject with id: {gameObjectIdInt}");
 
@@ -132,28 +149,26 @@ namespace Tool
 
                                 gameObject.Name = gameObjectName;
 
+                                //outputFile.WriteLine(gameObjectName);
                                 break;
                             }
                         }
-                        allGameObjects.Add(gameObject);
                     }
                     else if (line.StartsWith("--- !u!4 ")) // Transform
                     {
-                        Transform transform = new();
-
+                        if (gameObject == null)
+                        {
+                            Console.WriteLine($"Error: Transform does not belong to a GameObject. Leaving file...");
+                            break;
+                        }
                         // split line by space
                         string[] lineSplit = line.Split(' ');
 
                         int fileId = int.Parse(lineSplit[2][1..]);
 
-                        transform.FileID = fileId;
-
                         Console.WriteLine($"Found Transform with id: {fileId}");
 
-                        bool foundGameObject = false;
-                        bool foundFather = false;
-                        
-                        // Search for attributes
+                        // Search for m_Father
                         while ((line = reader.ReadLine()) != null)
                         {
                             if (line.StartsWith("--- !u!")) // Next component
@@ -162,59 +177,27 @@ namespace Tool
                                 break;
                             }
 
-                            if (line.StartsWith("  m_GameObject: {fileID: "))
+                            if (line.StartsWith("  m_Father: {fileID: "))
                             {
-                                string gameObjectFileId = line.Split(":")[2].Trim();
-                                int gameObjectFileIdInt = int.Parse(gameObjectFileId[..^1]);
-                                Console.WriteLine($"Transform belongs to GameObject: {gameObjectFileIdInt}");
-
-                                transform.GameObjectFileID = gameObjectFileIdInt;
-
-                                foundGameObject = true;
-                            }
-                            else if (line.StartsWith("  m_Father: {fileID: "))
-                            {
-                                string fatherFileId = line.Split(":")[2].Trim();
+                                string fatherFileId = line.Split(":")[1].Trim();
                                 int fatherFileIdInt = int.Parse(fatherFileId[..^1]);
                                 Console.WriteLine($"Found Father: {fatherFileIdInt}");
 
-                                transform.FatherFileID = fatherFileIdInt;
+                                // Find father transform
+                                var fatherTransform = rootGameObject.GetGameObjectById(fatherFileIdInt);
+                                if (fatherTransform == null)
+                                {
+                                    Console.WriteLine($"Error: Could not find father transform with id: {fatherFileIdInt}");
+                                    break;
+                                }
 
-                                foundFather = true;
-                            }
+                                fatherTransform.Children.Add(gameObject);
 
-                            if (foundGameObject && foundFather)
-                            {
                                 break;
                             }
                         }
-
-
-                        allTransforms.Add(transform);
                     }
                     
-                }
-
-                Transform rootTransform = new();
-                rootTransform.FileID = 0;
-                rootTransform.Name = "*ROOT*";
-
-                allTransforms.Add(rootTransform);
-
-                foreach (var tr in allTransforms)
-                {
-                    if (tr.FileID == 0) // skip root
-                    {
-                        continue;
-                    }
-
-                    tr.Name = allGameObjects.Find(x => x.GameObjectFileID == tr.GameObjectFileID)?.Name;
-
-                    var father = allTransforms.Find(x => x.FileID == tr.FatherFileID);
-
-                    Debug.Assert(father != null);
-                    
-                    father.Children.Add(tr);
                 }
 
                 StreamWriter outputFile = File.CreateText(outputFilePath);
@@ -225,11 +208,8 @@ namespace Tool
                 }
 
                 // Write to file. Recursive function
-                // Do not write root
-                foreach (var child in rootTransform.Children)
-                {
-                    child.WriteToFile(outputFile, 0);
-                }
+                rootGameObject.WriteToFile(outputFile, 0);
+
 
                 reader.Close();
                 outputFile.Close();
