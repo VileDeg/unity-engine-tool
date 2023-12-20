@@ -5,10 +5,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RunArguments>@"../../../../../../norm/TestCase01/TestCase01" ../../../../tool-output</RunArguments>
+    <RunArguments>@"../../../../../../my_test_cases" ../../../../tool-output_my_test_cases</RunArguments>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
     <PackageReference Include="YamlDotNet" Version="13.7.1" />
   </ItemGroup>
 

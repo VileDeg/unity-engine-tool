@@ -1,6 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
 
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
 namespace Tool
 {
     class Transform
@@ -56,6 +60,37 @@ namespace Tool
                 Console.WriteLine(str, args);
             }
         }
+
+        static bool ContainsSerializeFieldAttribute(string code)
+        {
+            SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(code);
+
+            // Get the root syntax node of the syntax tree
+            SyntaxNode root = syntaxTree.GetRoot();
+
+            // Find all field declarations with the [SerializeField] attribute
+            var fieldDeclarations = root.DescendantNodes().OfType<FieldDeclarationSyntax>();
+            foreach (var fieldDeclaration in fieldDeclarations)
+            {
+                foreach (var attributeList in fieldDeclaration.AttributeLists)
+                {
+                    foreach (var attribute in attributeList.Attributes)
+                    {
+                        var attributeName = attribute.Name.ToString();
+                        if (attributeName == "SerializeField")
+                        {
+                            // Found a field with [SerializeField] attribute
+                            var fieldName = fieldDeclaration.Declaration.Variables.First().Identifier.Text;
+                            $"Field {fieldName} has [SerializeField] attribute".Cout();
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
         private static void ParseUnityScenes(string projectFolderPath, string outputFolderPath)
         {
             string assetsFolder = Path.Combine(projectFolderPath, "Assets");
@@ -103,6 +138,14 @@ namespace Tool
             {
                 string scriptFile = scriptFiles[i];
 
+                // Parse script file with Roslyn to check for presence of SerializeField attribute
+
+                UnityScript unityScript = new();
+
+                string contents = File.ReadAllText(scriptFile);
+
+                unityScript.UsedByScene = ContainsSerializeFieldAttribute(contents);
+
                 // Search for GUID in .meta file
                 string metaFile = scriptFile + ".meta";
                 StreamReader reader = File.OpenText(metaFile);
@@ -115,7 +158,6 @@ namespace Tool
 
                 Console.WriteLine($"Parsing script file: {scriptFile}");
 
-                UnityScript unityScript = new();
 
                 string? line;
                 while ((line = reader.ReadLine()) != null) 
@@ -132,7 +174,6 @@ namespace Tool
                 }
 
                 unityScript.FilePath = scriptFile;
-                unityScript.UsedByScene = false;
 
                 unityScripts.Add(unityScript);
 
@@ -144,7 +185,7 @@ namespace Tool
             {
                 string sceneFile = sceneFiles[i];
 
-                string sceneOutputFile = Path.Combine(outputFolderPath, Path.GetFileNameWithoutExtension(sceneFile) + ".unity.dump");
+                
 
                 
                 using StreamReader reader = File.OpenText(sceneFile);
@@ -262,7 +303,6 @@ namespace Tool
                     }
                     else if (line.StartsWith("--- !u!114")) // MonoBehaviour
                     {
-
                         // split line by space
                         string[] lineSplit = line.Split(' ');
 
@@ -330,10 +370,23 @@ namespace Tool
                     father.Children.Add(tr);
                 }
 
-                using StreamWriter sceneOutStream = File.CreateText(sceneOutputFile);
+                
+                string sceneRelativePath = Path.GetRelativePath(scenesFolder, sceneFile);
+
+                string sceneOutputFilePath = Path.ChangeExtension(
+                    Path.Combine(outputFolderPath, sceneRelativePath), ".unity.dump"
+                );
+
+                string? directoryPath = Path.GetDirectoryName(sceneOutputFilePath);
+                if (directoryPath != null)
+                {
+                    Directory.CreateDirectory(directoryPath);
+                }
+
+                using StreamWriter sceneOutStream = File.CreateText(sceneOutputFilePath);
                 if (sceneOutStream == null)
                 {
-                    Console.WriteLine($"Error: Could not open file: {sceneOutputFile}");
+                    Console.WriteLine($"Error: Could not open file: {sceneOutputFilePath}");
                     return;
                 }
 
@@ -344,10 +397,12 @@ namespace Tool
                     child.WriteToFile(sceneOutStream, 0);
                 }
 
-                using StreamWriter scriptsOutStream = File.CreateText(Path.Combine(outputFolderPath, "UnusedScripts.csv"));
+                string unsusedScriptsFilePath = Path.Combine(outputFolderPath, "UnusedScripts.csv");
+                // Write unused scripts to file
+                using StreamWriter scriptsOutStream = File.CreateText(unsusedScriptsFilePath);
                 if (scriptsOutStream == null)
                 {
-                    Console.WriteLine($"Error: Could not open file: {Path.Combine(outputFolderPath, "UnusedScripts.csv")}");
+                    Console.WriteLine($"Error: Could not open file: {unsusedScriptsFilePath}");
                     return;
                 }
 

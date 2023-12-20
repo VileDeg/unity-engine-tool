@@ -1,9 +1,18 @@
 {
   "version": 2,
-  "dgSpecHash": "OkTxzlaA1dV4y1UWYguYSqBKFuRKIFzLCjSsxoU1l4C4kkvyXlw7ko6hbh9gpmN5Ax2B631PEPHCtpRx5CFSEg==",
+  "dgSpecHash": "pZgfdh1RhO4tQ2l2vSJzhOfPbzhb9D6spMgp1YOjn6I191oBnZL7kKR0QCniDsL3qGGYtH6UNtVGjwM01qiu6g==",
   "success": true,
   "projectFilePath": "C:\\dev\\C#\\JetBrains-GameDev-tools\\tool\\tool.csproj",
   "expectedPackageFiles": [
+    "C:\\Users\\ED\\.nuget\\packages\\microsoft.codeanalysis.analyzers\\3.3.4\\microsoft.codeanalysis.analyzers.3.3.4.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\microsoft.codeanalysis.common\\4.8.0\\microsoft.codeanalysis.common.4.8.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\microsoft.codeanalysis.csharp\\4.8.0\\microsoft.codeanalysis.csharp.4.8.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\microsoft.codeanalysis.csharp.scripting\\4.8.0\\microsoft.codeanalysis.csharp.scripting.4.8.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\microsoft.codeanalysis.scripting.common\\4.8.0\\microsoft.codeanalysis.scripting.common.4.8.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\microsoft.csharp\\4.7.0\\microsoft.csharp.4.7.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\system.collections.immutable\\7.0.0\\system.collections.immutable.7.0.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\system.reflection.metadata\\7.0.0\\system.reflection.metadata.7.0.0.nupkg.sha512",
+    "C:\\Users\\ED\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\6.0.0\\system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512",
     "C:\\Users\\ED\\.nuget\\packages\\yamldotnet\\13.7.1\\yamldotnet.13.7.1.nupkg.sha512"
   ],
   "logs": []
