@@ -41,7 +41,6 @@ namespace Tool
         public string? Name { get; set; }
         public int GameObjectFileID { get; set; }
     }
-
     class UnityScript
     {
         public string? GUID { get; set; }
@@ -52,16 +51,28 @@ namespace Tool
     
     static partial class Program
     {
-        private static readonly bool Verbose = true;
-        private static void Cout(this string str, params object[] args) 
+        private static readonly bool Verbose = false;
+
+        private static string? assetsFolderPath;
+        private static string? projectFolderPath;
+        private static string? outputFolderPath;
+
+        [GeneratedRegex(@"\{fileID: (\d+), guid: (\w+), type: (\d+)\}")]
+        private static partial Regex MScriptRegex();
+
+        private static void DebugCout(this string str, params object[] args) 
         { 
-            if (Verbose)
-            {
+            if (Verbose) {
                 Console.WriteLine(str, args);
             }
         }
 
-        static bool ContainsSerializeFieldAttribute(string code)
+        private static void Cerr(this string str, params object[] args) 
+        { 
+            Console.WriteLine(str, args);
+        }
+
+        private static bool ContainsSerializeFieldAttribute(string code)
         {
             SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(code);
 
@@ -81,7 +92,7 @@ namespace Tool
                         {
                             // Found a field with [SerializeField] attribute
                             var fieldName = fieldDeclaration.Declaration.Variables.First().Identifier.Text;
-                            $"Field {fieldName} has [SerializeField] attribute".Cout();
+                            $"Field {fieldName} has [SerializeField] attribute".DebugCout();
                             return true;
                         }
                     }
@@ -91,55 +102,149 @@ namespace Tool
             return false;
         }
 
-        private static void ParseUnityScenes(string projectFolderPath, string outputFolderPath)
+        private static void ParseGameObject(string? line, StreamReader reader, List<GameObject> allGameObjects)
         {
-            string assetsFolder = Path.Combine(projectFolderPath, "Assets");
+            GameObject gameObject = new();
+            // split line by space
+          
+            string[] lineSplit = line!.Split(' ');
+            string gameObjectId = lineSplit[2];
+            int gameObjectIdInt = int.Parse(gameObjectId[1..]);
 
-            string scenesFolder = Path.Combine(assetsFolder, "Scenes");
-            string scriptsFolder = Path.Combine(assetsFolder, "Scripts");
+            gameObject.GameObjectFileID = gameObjectIdInt;
 
-            string[] sceneFiles;
-            try 
+            $"Found GameObject with id: {gameObjectIdInt}".DebugCout();
+
+            // Search for m_Name
+            while ((line = reader.ReadLine()) != null)
             {
-                sceneFiles = Directory.GetFiles(scenesFolder, "*.unity", SearchOption.AllDirectories);
+                if (line.StartsWith("--- !u!")) { // Next component
+                    throw new Exception($"GameObject [{gameObjectIdInt}] does not contain m_Name. Leaving file...");
+                }
+
+                if (line.StartsWith("  m_Name: ")) {
+                    string gameObjectName = line.Split(":")[1].Trim();
+                    $"Found GameObject: {gameObjectName}".DebugCout();
+
+                    gameObject.Name = gameObjectName;
+                    break;
+                }
             }
-            catch (DirectoryNotFoundException e)
+            allGameObjects.Add(gameObject);
+        }
+
+        private static void ParseTransform(string? line, StreamReader reader, List<Transform> allTransforms)
+        {
+            Transform transform = new();
+
+            // split line by space
+            string[] lineSplit = line!.Split(' ');
+
+            int fileId = int.Parse(lineSplit[2][1..]);
+
+            transform.FileID = fileId;
+
+            $"Found Transform with id: {fileId}".DebugCout();
+
+            bool foundGameObject = false;
+            bool foundFather = false;
+            
+            // Search for attributes
+            while ((line = reader.ReadLine()) != null)
             {
-                $"Error: {e.Message}".Cout();
-                return;
+                if (line.StartsWith("--- !u!")) // Next component
+                {
+                    $"Error: Transform [{fileId}] does not contain m_Children. Leaving file...".Cerr();
+                    break;
+                }
+
+                if (line.StartsWith("  m_GameObject: {fileID: "))
+                {
+                    string gameObjectFileId = line.Split(":")[2].Trim();
+                    int gameObjectFileIdInt = int.Parse(gameObjectFileId[..^1]);
+                    $"Transform belongs to GameObject: {gameObjectFileIdInt}".DebugCout();
+
+                    transform.GameObjectFileID = gameObjectFileIdInt;
+
+                    foundGameObject = true;
+                }
+                else if (line.StartsWith("  m_Father: {fileID: "))
+                {
+                    string fatherFileId = line.Split(":")[2].Trim();
+                    int fatherFileIdInt = int.Parse(fatherFileId[..^1]);
+                    $"Found Father: {fatherFileIdInt}".DebugCout();
+
+                    transform.FatherFileID = fatherFileIdInt;
+
+                    foundFather = true;
+                }
+
+                if (foundGameObject && foundFather)
+                {
+                    break;
+                }
             }
 
-            string[] scriptFiles;
-            try 
-            {
-                scriptFiles = Directory.GetFiles(scriptsFolder, "*.cs", SearchOption.AllDirectories);
-            }
-            catch (DirectoryNotFoundException e)
-            {
-                $"Error: {e.Message}".Cout();
-                return;
-            }
+            allTransforms.Add(transform);
+        }
 
-            // Create output folder
-            try
-            {
-                Directory.CreateDirectory(outputFolderPath);
-            }
-            catch (Exception e)
-            {
-                $"Error: {e.Message}".Cout();
-                return;
-            }
+        private static void ParseMonoBehaviour(string? line, StreamReader reader, List<UnityScript> unityScripts)
+        {
+            // split line by space
+            string[] lineSplit = line!.Split(' ');
 
-            // Parse scripts
+            int fileId = int.Parse(lineSplit[2][1..]);
+
+            $"Found MonoBehaviour with id: {fileId}".DebugCout();
+
+            // Search for attributes
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (line.StartsWith("--- !u!")) // Next component
+                {
+                    $"Error: MonoBehaviour [{fileId}] does not contain m_Script. Leaving file...".Cerr();
+                    break;
+                }
+
+                if (line.StartsWith("  m_Script: {fileID: "))
+                {
+                    Regex regex = MScriptRegex();
+                    Match match = regex.Match(line);
+
+                    if (!match.Success)
+                    {
+                        $"Error: Could not parse line: {line}".Cerr();
+                        break;
+                    }
+
+                    string scriptGUID = match.Groups[2].Value;
+
+                    $"Found Script: {scriptGUID}".DebugCout();
+
+                    UnityScript? unityScript = unityScripts.Find(x => x.GUID == scriptGUID);
+
+                    if (unityScript == null)
+                    {
+                        $"Error: Could not find script with GUID: {scriptGUID}".Cerr();
+                        break;
+                    }
+
+                    unityScript.UsedByScene = true;
+
+                    break;
+                }
+            }
+        }
+
+        private static List<UnityScript> ParseUnityScripts()
+        {
+            string scriptsFolder = Path.Combine(assetsFolderPath!, "Scripts");
+
+            string[] scriptFiles = Directory.GetFiles(scriptsFolder, "*.cs", SearchOption.AllDirectories);
+
             List<UnityScript> unityScripts = [];
 
-            for (int i = 0; i < scriptFiles.Length; i++)
-            {
-                string scriptFile = scriptFiles[i];
-
-                // Parse script file with Roslyn to check for presence of SerializeField attribute
-
+            foreach (var scriptFile in scriptFiles) {
                 UnityScript unityScript = new();
 
                 string contents = File.ReadAllText(scriptFile);
@@ -148,24 +253,15 @@ namespace Tool
 
                 // Search for GUID in .meta file
                 string metaFile = scriptFile + ".meta";
-                StreamReader reader = File.OpenText(metaFile);
-
-                if (reader == null)
-                {
-                    Console.WriteLine($"Error: Could not open file: {scriptFile}");
-                    return;
-                }
-
-                Console.WriteLine($"Parsing script file: {scriptFile}");
-
+                using StreamReader reader = File.OpenText(metaFile);
+                
+                $"Parsing script file: {scriptFile}".DebugCout();
 
                 string? line;
-                while ((line = reader.ReadLine()) != null) 
-                {
-                    if (line.StartsWith("guid: "))
-                    {
+                while ((line = reader.ReadLine()) != null)  {
+                    if (line.StartsWith("guid: ")) {
                         string guid = line.Split(":")[1].Trim();
-                        Console.WriteLine($"Found GUID: {guid}");
+                        $"Found GUID: {guid}".DebugCout();
 
                         unityScript.GUID = guid;
 
@@ -176,27 +272,20 @@ namespace Tool
                 unityScript.FilePath = scriptFile;
 
                 unityScripts.Add(unityScript);
-
-                reader.Close();
             }
+            return unityScripts;
+        }
 
+        private static void ParseUnityScenes(List<UnityScript> unityScripts)
+        {
+            string scenesFolder = Path.Combine(assetsFolderPath!, "Scenes");
+            
+            string[] sceneFiles = Directory.GetFiles(scenesFolder, "*.unity", SearchOption.AllDirectories);
 
-            for (int i = 0; i < sceneFiles.Length; i++)
-            {
-                string sceneFile = sceneFiles[i];
-
-                
-
-                
+            foreach (var sceneFile in sceneFiles) {
                 using StreamReader reader = File.OpenText(sceneFile);
 
-                if (reader == null)
-                {
-                    Console.WriteLine($"Error: Could not open file: {sceneFile}");
-                    return;
-                }
-
-                Console.WriteLine($"Parsing scene file: {sceneFile}");
+                $"Parsing scene file: {sceneFile}".DebugCout();
 
                 List<GameObject> allGameObjects = [];
                 List<Transform> allTransforms = [];
@@ -209,155 +298,23 @@ namespace Tool
 
                 allTransforms.Add(rootTransform);
 
+                // Parse scene file
                 string? line;
-                while ((line = reader.ReadLine()) != null) 
-                {
-                    // Check if line contains --- !u!
-                   
-                    if (line.StartsWith("--- !u!1 ")) // GameObject
-                    {
-                        GameObject gameObject = new();
-                        // split line by space
-                        string[] lineSplit = line.Split(' ');
-                        string gameObjectId = lineSplit[2];
-                        int gameObjectIdInt = int.Parse(gameObjectId[1..]);
-
-                        gameObject.GameObjectFileID = gameObjectIdInt;
-
-                        Console.WriteLine($"Found GameObject with id: {gameObjectIdInt}");
-
-                        // Search for m_Name
-                        while ((line = reader.ReadLine()) != null)
-                        {
-                            if (line.StartsWith("--- !u!")) // Next component
-                            {
-                                Console.WriteLine($"Error: GameObject [{gameObjectIdInt}] does not contain m_Name. Leaving file...");
-                                break;
-                            }
-
-                            if (line.StartsWith("  m_Name: "))
-                            {
-                                string gameObjectName = line.Split(":")[1].Trim();
-                                Console.WriteLine($"Found GameObject: {gameObjectName}");
-
-                                gameObject.Name = gameObjectName;
-
-                                break;
-                            }
-                        }
-                        allGameObjects.Add(gameObject);
+                while ((line = reader.ReadLine()) != null) {
+                    if (line.StartsWith("--- !u!1 ")) { // GameObject
+                        ParseGameObject(line, reader, allGameObjects);
                     }
-                    else if (line.StartsWith("--- !u!4 ")) // Transform
-                    {
-                        Transform transform = new();
-
-                        // split line by space
-                        string[] lineSplit = line.Split(' ');
-
-                        int fileId = int.Parse(lineSplit[2][1..]);
-
-                        transform.FileID = fileId;
-
-                        Console.WriteLine($"Found Transform with id: {fileId}");
-
-                        bool foundGameObject = false;
-                        bool foundFather = false;
-                        
-                        // Search for attributes
-                        while ((line = reader.ReadLine()) != null)
-                        {
-                            if (line.StartsWith("--- !u!")) // Next component
-                            {
-                                Console.WriteLine($"Error: Transform [{fileId}] does not contain m_Children. Leaving file...");
-                                break;
-                            }
-
-                            if (line.StartsWith("  m_GameObject: {fileID: "))
-                            {
-                                string gameObjectFileId = line.Split(":")[2].Trim();
-                                int gameObjectFileIdInt = int.Parse(gameObjectFileId[..^1]);
-                                Console.WriteLine($"Transform belongs to GameObject: {gameObjectFileIdInt}");
-
-                                transform.GameObjectFileID = gameObjectFileIdInt;
-
-                                foundGameObject = true;
-                            }
-                            else if (line.StartsWith("  m_Father: {fileID: "))
-                            {
-                                string fatherFileId = line.Split(":")[2].Trim();
-                                int fatherFileIdInt = int.Parse(fatherFileId[..^1]);
-                                Console.WriteLine($"Found Father: {fatherFileIdInt}");
-
-                                transform.FatherFileID = fatherFileIdInt;
-
-                                foundFather = true;
-                            }
-
-                            if (foundGameObject && foundFather)
-                            {
-                                break;
-                            }
-                        }
-
-                        allTransforms.Add(transform);
+                    else if (line.StartsWith("--- !u!4 ")) { // Transform
+                        ParseTransform(line, reader, allTransforms);
                     }
-                    else if (line.StartsWith("--- !u!114")) // MonoBehaviour
-                    {
-                        // split line by space
-                        string[] lineSplit = line.Split(' ');
-
-                        int fileId = int.Parse(lineSplit[2][1..]);
-
-                        Console.WriteLine($"Found MonoBehaviour with id: {fileId}");
-
-                        // Search for attributes
-                        while ((line = reader.ReadLine()) != null)
-                        {
-                            if (line.StartsWith("--- !u!")) // Next component
-                            {
-                                Console.WriteLine($"Error: MonoBehaviour [{fileId}] does not contain m_Script. Leaving file...");
-                                break;
-                            }
-
-                            if (line.StartsWith("  m_Script: {fileID: "))
-                            {
-                                Regex regex = MScriptRegex();
-                                Match match = regex.Match(line);
-
-                                if (!match.Success)
-                                {
-                                    Console.WriteLine($"Error: Could not parse line: {line}");
-                                    break;
-                                }
-
-                                string scriptGUID = match.Groups[2].Value;
-
-                                Console.WriteLine($"Found Script: {scriptGUID}");
-                                // string scriptFileId = line.Split(":")[2].Trim();
-                                // int scriptFileIdInt = int.Parse(scriptFileId[..^1]);
-                                //Console.WriteLine($"Found Script: {scriptFileIdInt}");
-
-                                UnityScript? unityScript = unityScripts.Find(x => x.GUID == scriptGUID);
-
-                                if (unityScript == null)
-                                {
-                                    Console.WriteLine($"Error: Could not find script with GUID: {scriptGUID}");
-                                    break;
-                                }
-
-                                unityScript.UsedByScene = true;
-
-                                break;
-                            }
-                        }
-
+                    else if (line.StartsWith("--- !u!114")) { // MonoBehaviour
+                        ParseMonoBehaviour(line, reader, unityScripts);
                     }
                 }
 
-                foreach (var tr in allTransforms)
-                {
-                    if (tr.FileID == 0) // skip root
-                    {
+                // Build transform tree
+                foreach (var tr in allTransforms) {
+                    if (tr.FileID == 0) { // skip root
                         continue;
                     }
 
@@ -374,75 +331,104 @@ namespace Tool
                 string sceneRelativePath = Path.GetRelativePath(scenesFolder, sceneFile);
 
                 string sceneOutputFilePath = Path.ChangeExtension(
-                    Path.Combine(outputFolderPath, sceneRelativePath), ".unity.dump"
+                    Path.Combine(outputFolderPath!, sceneRelativePath), ".unity.dump"
                 );
 
                 string? directoryPath = Path.GetDirectoryName(sceneOutputFilePath);
-                if (directoryPath != null)
-                {
+                if (directoryPath != null) {
                     Directory.CreateDirectory(directoryPath);
                 }
 
                 using StreamWriter sceneOutStream = File.CreateText(sceneOutputFilePath);
-                if (sceneOutStream == null)
-                {
-                    Console.WriteLine($"Error: Could not open file: {sceneOutputFilePath}");
-                    return;
-                }
 
-                // Write to file. Recursive function
+                // Write the hierarchy to file recursively
                 // Do not write root
-                foreach (var child in rootTransform.Children)
-                {
+                foreach (var child in rootTransform.Children) {
                     child.WriteToFile(sceneOutStream, 0);
                 }
+            }
 
-                string unsusedScriptsFilePath = Path.Combine(outputFolderPath, "UnusedScripts.csv");
-                // Write unused scripts to file
-                using StreamWriter scriptsOutStream = File.CreateText(unsusedScriptsFilePath);
-                if (scriptsOutStream == null)
-                {
-                    Console.WriteLine($"Error: Could not open file: {unsusedScriptsFilePath}");
-                    return;
-                }
+            string unsusedScriptsFilePath = Path.Combine(outputFolderPath!, "UnusedScripts.csv");
+            // Write unused scripts to file
+            using StreamWriter scriptsOutStream = File.CreateText(unsusedScriptsFilePath);
 
-                scriptsOutStream.WriteLine("Relative Path,GUID");
-                foreach (var script in unityScripts)
-                {
-                    if (!script.UsedByScene)
-                    {
-                        Debug.Assert(script.FilePath != null);
+            scriptsOutStream.WriteLine("Relative Path,GUID");
+            foreach (var script in unityScripts) {
+                if (!script.UsedByScene) {
+                    Debug.Assert(script.FilePath != null);
 
-                        string relativePath = Path.GetRelativePath(projectFolderPath, script.FilePath);
-                        relativePath = relativePath.Replace('\\', '/');
-                        scriptsOutStream.WriteLine(relativePath + "," + script.GUID);
-                    }
+                    string relativePath = Path.GetRelativePath(projectFolderPath!, script.FilePath);
+                    relativePath = relativePath.Replace('\\', '/');
+
+                    scriptsOutStream.WriteLine(relativePath + "," + script.GUID);
                 }
             }
+        }
+        private static void ParseUnityProject()
+        {
+            Directory.CreateDirectory(outputFolderPath!);
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
+            List<UnityScript> unityScripts;
+            // Parse scripts
+            try {
+                unityScripts = ParseUnityScripts();
+            } catch (Exception e) {
+                throw new Exception($"Could not parse scripts: {e}");
+            }
+
+            stopwatch.Stop();
+            $"***Parsed scripts in {stopwatch.ElapsedMilliseconds} ms".DebugCout();
+
+
+            stopwatch.Restart();
+            // Parse scenes
+            try {
+                ParseUnityScenes(unityScripts);
+            } catch (Exception e) {
+                throw new Exception($"Could not parse scenes: {e}");
+            }
+
+            stopwatch.Stop();
+            $"***Parsed scenes in {stopwatch.ElapsedMilliseconds} ms".DebugCout();
         }
 
         static void Main(string[] args)
         {
-            if (args.Length != 2)
-            {
-                Console.WriteLine("Error: Invalid number of arguments");
-                Console.WriteLine("Usage: tool.exe <project folder path> <output folder path>");
+            if (args.Length != 2) {
+                "Error: Invalid number of arguments".Cerr();
+                "Usage: tool.exe <project folder path> <output folder path>".Cerr();
                 return;
             }
 
-            foreach (var arg in args)
-            {
-                Console.WriteLine(arg);
+            "Arguments:".DebugCout();
+            foreach (var arg in args) {
+                arg.DebugCout();
             }
             
-            string projectFolderPath = args[0];
-            string outputFolderPath = args[1];
+            projectFolderPath = args[0];
+            outputFolderPath = args[1];
 
-            ParseUnityScenes(projectFolderPath, outputFolderPath);  
+            if (!Directory.Exists(projectFolderPath)) {
+                $"Error: Project folder does not exist: {projectFolderPath}".Cerr();
+                return;
+            }
+
+            assetsFolderPath = Path.Combine(projectFolderPath, "Assets");
+
+            if (!Directory.Exists(assetsFolderPath)) {
+                $"Error: Assets folder does not exist: {assetsFolderPath}".Cerr();
+                return;
+            }
+
+            try {
+                ParseUnityProject();  
+            } catch (Exception e) {
+                $"Error: Could not parse Unity project: {e}".Cerr();
+                return;
+            }
         }
-
-        [GeneratedRegex(@"\{fileID: (\d+), guid: (\w+), type: (\d+)\}")]
-        private static partial Regex MScriptRegex();
     }
 }
 
